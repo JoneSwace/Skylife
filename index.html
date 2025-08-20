@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <title>Skylife</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #cef; }
+    #menu, #start-screen, #character-select, #game, #game-over, #online-screen {
+      display: none; padding: 20px; text-align: center;
+    }
+    #menu { display: block; background: #333; color: #fff; }
+    button {
+      padding: 10px 20px; font-size: 16px; margin: 10px; cursor: pointer;
+    }
+    .character {
+      display: inline-block; margin: 10px; padding: 10px;
+      border: 2px solid black; cursor: pointer; background: #fff;
+      font-size: 24px;
+    }
+    .locked { opacity: 0.3; pointer-events: none; }
+    canvas {
+      display: block; margin: 0 auto; border: 2px solid black; background: #aef;
+    }
+    #message, #score-display, #restart-instruction {
+      font-size: 18px; margin: 10px;
+    }
+    #backToMenuBtn, #backToMenuBtnGameOver {
+      background: #f44336; color: white; border: none;
+      padding: 10px 20px; margin: 10px auto; display: block;
+      cursor: pointer; border-radius: 5px;
+    }
+    #online-screen input {
+      padding: 8px; font-size: 16px; width: 180px; text-align: center;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="menu">
+  <h1>Skylife</h1>
+  <button id="startGameBtn">Játék</button>
+  <button id="onlineBtn">Online mód</button>
+</div>
+
+<div id="start-screen">
+  <h2>Kezdés előtt</h2>
+  <button id="chooseCharBtn">Karakter választás</button>
+</div>
+
+<div id="character-select">
+  <h2>Válassz karaktert</h2>
+  <div id="character-list"></div>
+</div>
+
+<div id="game">
+  <div id="message">Nyomd meg a SPACE-t a kezdéshez!</div>
+  <canvas id="game-canvas" width="800" height="400"></canvas>
+  <div id="score-display">Pont: 0</div>
+  <button id="backToMenuBtn">Vissza a főmenübe</button>
+</div>
+
+<div id="game-over">
+  <h2>💀 Vesztettél!</h2>
+  <div id="restart-instruction">Nyomd meg az ENTER-t az újrakezdéshez</div>
+  <button id="backToMenuBtnGameOver">Vissza a főmenübe</button>
+</div>
+
+<div id="online-screen">
+  <h2>Online mód</h2>
+  <div><strong>Saját ID:</strong> <span id="myId"></span></div>
+  <input type="text" id="joinIdInput" placeholder="Ellenfél 6 számjegyű ID-ja" maxlength="6" />
+  <button id="joinBtn">Csatlakozás</button>
+  <button id="backFromOnlineBtn">Vissza</button>
+</div>
+
+<script>
+(() => {
+  const characterData = [
+    { name: "Ervix", cost: 0, color: "red", emoji: "🐰" },
+    { name: "Zentor", cost: 50, color: "blue", emoji: "🦊" },
+    { name: "Nerion", cost: 100, color: "green", emoji: "🐸" },
+    { name: "Maxor", cost: 150, color: "purple", emoji: "🐵" },
+    { name: "Lunex", cost: 200, color: "orange", emoji: "🦄" },
+    { name: "Kairox", cost: 300, color: "teal", emoji: "🐯" },
+    { name: "Velron", cost: 400, color: "gold", emoji: "🐲" },
+    { name: "Mytra", cost: 500, color: "black", emoji: "🐙" },
+    { name: "Erixa", cost: 600, color: "pink", emoji: "🐰" },
+    { name: "Xalor", cost: 700, color: "brown", emoji: "🐻" },
+    { name: "Drakor", cost: 800, color: "darkred", emoji: "🐉" },
+    { name: "Zelara", cost: 900, color: "darkblue", emoji: "🦋" },
+    { name: "Firon", cost: 1000, color: "darkgreen", emoji: "🦖" },
+    { name: "Quorra", cost: 1200, color: "violet", emoji: "🐩" },
+    { name: "Thron", cost: 1400, color: "lime", emoji: "🐝" },
+    { name: "Grax", cost: 1600, color: "navy", emoji: "🐬" },
+    { name: "Syra", cost: 1800, color: "salmon", emoji: "🐠" },
+    { name: "Voltar", cost: 2000, color: "maroon", emoji: "🦇" },
+    { name: "Nyrix", cost: 2500, color: "indigo", emoji: "🐺" },
+    { name: "Xylon", cost: 3000, color: "darkorange", emoji: "🦉" }
+  ];
+
+  let unlocked = JSON.parse(localStorage.getItem("unlocked")) || ["Ervix"];
+  let selectedCharacter = "Ervix";
+
+  const menu = document.getElementById("menu");
+  const startScreen = document.getElementById("start-screen");
+  const charSelect = document.getElementById("character-select");
+  const gameDiv = document.getElementById("game");
+  const gameOverDiv = document.getElementById("game-over");
+  const message = document.getElementById("message");
+  const scoreDisplay = document.getElementById("score-display");
+  const canvas = document.getElementById("game-canvas");
+  const ctx = canvas.getContext("2d");
+  const charList = document.getElementById("character-list");
+  const backToMenuBtn = document.getElementById("backToMenuBtn");
+  const backToMenuBtnGameOver = document.getElementById("backToMenuBtnGameOver");
+
+  const onlineScreen = document.getElementById("online-screen");
+  const myIdSpan = document.getElementById("myId");
+  const joinIdInput = document.getElementById("joinIdInput");
+  const joinBtn = document.getElementById("joinBtn");
+  const backFromOnlineBtn = document.getElementById("backFromOnlineBtn");
+
+  let keys = {}, score = 0, gameStarted = false, gameOver = false;
+  let player, platforms, scrollX, gravity = 0.8, speed = 3;
+
+  let jumpCount = 0;         // ugrások száma (max 2)
+  let isSpaceHeld = false;   // space nyomva tartva
+  let holdTime = 0;          // space nyomva tartás ideje
+  const maxHoldTime = 40;    // meddig lehet “repülni”
+
+  let myOnlineId = "";
+  let opponentId = "";
+  let opponent = null;
+
+  // Egyedi 6 számjegyű ID generálása
+  function generateId() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  const showMenu = () => {
+    menu.style.display = "block";
+    startScreen.style.display = "none";
+    charSelect.style.display = "none";
+    gameDiv.style.display = "none";
+    gameOverDiv.style.display = "none";
+    onlineScreen.style.display = "none";
+  };
+
+  const showCharSelect = () => {
+    startScreen.style.display = "none";
+    charSelect.style.display = "block";
+    charList.innerHTML = "";
+    characterData.forEach(c => {
+      const div = document.createElement("div");
+      div.className = "character";
+      if (!unlocked.includes(c.name)) div.classList.add("locked");
+      div.innerText = `${c.emoji} ${c.name} (${c.cost} pont)`;
+      div.style.background = c.color;
+      div.dataset.name = c.name;
+      charList.appendChild(div);
+    });
+  };
+
+  charList.addEventListener("click", e => {
+    const name = e.target.dataset.name;
+    if (!unlocked.includes(name)) return;
+    selectedCharacter = name;
+    charSelect.style.display = "none";
+    gameDiv.style.display = "block";
+    message.style.display = "block";
+    window.addEventListener("keydown", waitForStart);
+  });
+
+  const waitForStart = (e) => {
+    if (e.code === "Space") {
+      window.removeEventListener("keydown", waitForStart);
+      message.style.display = "none";
+      startGame();
+    }
+  };
+
+  const startGame = () => {
+    gameStarted = true;
+    gameOver = false;
+    score = 0;
+    scrollX = 0;
+    jumpCount = 0;
+    isSpaceHeld = false;
+    holdTime = 0;
+    opponent = null; // reset opponent pozíció is
+
+    platforms = [
+      { x: 0, y: 350, w: 1200, h: 10 }
+    ];
+
+    player = {
+      x: 100,
+      y: 320,
+      w: 30,
+      h: 30,
+      vy: 0,
+      color: characterData.find(c => c.name === selectedCharacter).color,
+      emoji: characterData.find(c => c.name === selectedCharacter).emoji
+    };
+
+    for (let i = 1; i < 30; i++) {
+      platforms.push({
+        x: 1200 + i * 200,
+        y: 350 - Math.random() * 100,
+        w: 100,
+        h: 10
+      });
+    }
+
+    loop();
+  };
+
+  const addPlatform = () => {
+    const last = platforms[platforms.length - 1];
+    const newX = last.x + 200;
+    const newY = 350 - Math.random() * 100;
+    platforms.push({ x: newX, y: newY, w: 100, h: 10 });
+  };
+
+  const update = () => {
+    // ugrás kezelése
+    if (keys[" "]) {
+      if (!isSpaceHeld) {
+        if (jumpCount < 2) {
+          player.vy = jumpCount === 0 ? -12 : -15;
+          jumpCount++;
+          isSpaceHeld = true;
+          holdTime = 0;
+        }
+      } else {
+        if (holdTime < maxHoldTime) {
+          player.vy -= 0.4;
+          holdTime++;
+        }
+      }
+    } else {
+      isSpaceHeld = false;
+      holdTime = maxHoldTime;
+    }
+
+    player.vy += gravity;
+    player.y += player.vy;
+    player.x += speed;
+    scrollX = player.x - 100;
+
+    if (platforms[platforms.length - 1].x - scrollX < canvas.width) {
+      addPlatform();
+    }
+
+    let onPlatform = false;
+    for (const p of platforms) {
+      const playerBottom = player.y + player.h;
+      const nextPlayerBottom = playerBottom + player.vy;
+      const playerRight = player.x + player.w;
+      const playerLeft = player.x;
+
+      const horizontalOverlap = playerRight > p.x && playerLeft < p.x + p.w;
+
+      if (horizontalOverlap) {
+        if (playerBottom <= p.y && nextPlayerBottom >= p.y) {
+          player.y = p.y - player.h;
+          player.vy = 0;
+          jumpCount = 0;
+          onPlatform = true;
+          break;
+        } else if (playerBottom > p.y && player.y < p.y) {
+          player.y = p.y - player.h;
+          player.vy = 0;
+          jumpCount = 0;
+          onPlatform = true;
+          break;
+        }
+      }
+    }
+
+       if (player.y > canvas.height) {
+      gameOver = true;
+      gameDiv.style.display = "none";
+      gameOverDiv.style.display = "block";
+    }
+
+    score += 0.1;
+    scoreDisplay.innerText = `Pont: ${Math.floor(score)}`;
+    checkUnlocks();
+
+    // Egyszerű ellenfél mozgatása (szimulált)
+    if (opponent) {
+      opponent.x += speed * 0.98; // kicsit lassabb vagy gyorsabb lehet
+    }
+  };
+
+  const checkUnlocks = () => {
+    for (const char of characterData) {
+      if (score >= char.cost && !unlocked.includes(char.name)) {
+        unlocked.push(char.name);
+        localStorage.setItem("unlocked", JSON.stringify(unlocked));
+      }
+    }
+  };
+
+  const draw = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // platformok
+    ctx.fillStyle = "green";
+    for (const p of platforms) {
+      const relX = p.x - scrollX;
+      ctx.fillRect(relX, p.y, p.w, p.h);
+    }
+
+    // játékos
+    ctx.font = "30px serif";
+    ctx.textBaseline = "top";
+    ctx.fillText(player.emoji, player.x - scrollX, player.y);
+
+    // ellenfél emoji (ha van)
+    if (opponent) {
+      ctx.fillText("👾", opponent.x - scrollX, opponent.y);
+    }
+  };
+
+  const loop = () => {
+    if (!gameOver) {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+  };
+
+  // Menü és gombok
+  document.getElementById("startGameBtn").onclick = () => {
+    menu.style.display = "none";
+    startScreen.style.display = "block";
+  };
+
+  document.getElementById("chooseCharBtn").onclick = showCharSelect;
+
+  document.getElementById("onlineBtn").onclick = () => {
+    menu.style.display = "none";
+    onlineScreen.style.display = "block";
+    myOnlineId = generateId();
+    myIdSpan.innerText = myOnlineId;
+  };
+
+  joinBtn.onclick = () => {
+    opponentId = joinIdInput.value.trim();
+    if (opponentId.length !== 6 || isNaN(opponentId)) {
+      alert("Hibás ID! 6 számjegy kell.");
+      return;
+    }
+
+    // Egyszerű ellenfél-szimuláció hozzáadása
+    opponent = {
+      x: 100,
+      y: 320,
+      w: 30,
+      h: 30,
+      vy: 0,
+    };
+
+    onlineScreen.style.display = "none";
+    gameDiv.style.display = "block";
+    message.style.display = "block";
+    window.addEventListener("keydown", waitForStart);
+  };
+
+  backFromOnlineBtn.onclick = showMenu;
+
+  window.addEventListener("keydown", e => {
+    keys[e.key] = true;
+
+    if (gameOver && e.key === "Enter") {
+      gameOverDiv.style.display = "none";
+      gameDiv.style.display = "block";
+      message.style.display = "block";
+      window.addEventListener("keydown", waitForStart);
+    }
+  });
+
+  window.addEventListener("keyup", e => {
+    keys[e.key] = false;
+  });
+
+  backToMenuBtn.onclick = backToMenuBtnGameOver.onclick = () => {
+    gameDiv.style.display = "none";
+    gameOverDiv.style.display = "none";
+    message.style.display = "none";
+    gameStarted = false;
+    gameOver = false;
+    score = 0;
+    showMenu();
+  };
+
+  showMenu();
+})();
+</script>
+<script src="main.js"></script>
+</body>
+</html>
+
